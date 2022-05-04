@@ -494,6 +494,7 @@ const (
 	SS_BERTHING = iota
 	SS_BERTHED
 	SS_WAITING
+	SS_GONE
 )
 
 func (s *Ship) ProcessEvent(e Event) {
@@ -535,6 +536,8 @@ func (s *Ship) ProcessEvent(e Event) {
 		})
 	case S_ASSIGN:
 		s.Berth = e.Payload
+	case S_LAUNCH:
+		s.State = SS_GONE
 	}
 }
 
