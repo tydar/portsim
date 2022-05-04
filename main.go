@@ -14,7 +14,7 @@ import (
 func main() {
 	dispatch := NewDispatcher()
 	b1 := NewBerth(1, 5000, 100, &dispatch)
-	b2 := NewBerth(1, 5000, 1000, &dispatch)
+	b2 := NewBerth(2, 5000, 1000, &dispatch)
 	s1 := NewShip(1, 1, 100, &dispatch)
 	s2 := NewShip(2, 1, 100, &dispatch)
 
@@ -31,7 +31,7 @@ func main() {
 		dispatch.ProcessNextEvent()
 	}
 
-	fmt.Printf("Ship berthing? %t \n", dispatch.Ships[1].State == SS_BERTHING)
+	fmt.Printf("Ship berthed? %t \n", dispatch.Ships[1].State == SS_BERTHED)
 	fmt.Printf("Tug moving? %t \n", dispatch.Tugs[1].State == TS_MOVING)
 	fmt.Printf("arrival queue: %+v\n", dispatch.BerthQueue)
 }
@@ -85,6 +85,7 @@ const (
 	D_BERTH_OCCUPIED
 	D_BERTH_EMPTY
 	D_SHIP_ASSIGNED
+	D_UNLOADING_DONE
 
 	//ship
 	S_ATTACH
@@ -321,10 +322,10 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 		}
 
 		d.AddEvent(Event{
-			Type:       S_BERTH,
+			Type:       S_LAUNCH,
 			TargetType: TGT_SHIP,
 			TargetID:   e.Payload,
-			Payload:    0,
+			Payload:    ship.Berth,
 			Time:       e.Time + timeUnderway,
 		})
 
@@ -437,6 +438,24 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 		} else {
 			d.AvailableBerths = append(d.AvailableBerths, e.Payload)
 		}
+	case D_UNLOADING_DONE:
+		d.DeparturesQueue = append(d.DeparturesQueue, e.Payload)
+		tugsCount := len(d.AvailableTugs)
+		index := 0
+		if tugsCount > 0 {
+			// dispatch appropriate number of tugs based on the ship's needs & capacity
+			for i := 0; i < tugsCount && i < d.Ships[e.Payload].TugSize; i++ {
+				d.AddEvent(Event{
+					Type:       T_SHIP,
+					TargetType: TGT_TUG,
+					TargetID:   d.AvailableTugs[i],
+					Payload:    e.Payload,
+					Time:       e.Time,
+				})
+				index = i
+			}
+		}
+		d.AvailableTugs = d.AvailableTugs[index:]
 	}
 }
 
@@ -505,9 +524,15 @@ func (s *Ship) ProcessEvent(e Event) {
 
 	case S_DETACH:
 		s.TugCount--
-
 	case S_BERTH:
 		s.State = SS_BERTHED
+		s.Dispatcher.AddEvent(Event{
+			Type:       B_DOCK,
+			TargetType: TGT_BERTH,
+			TargetID:   s.Berth,
+			Payload:    s.ID,
+			Time:       e.Time,
+		})
 	case S_ASSIGN:
 		s.Berth = e.Payload
 	}
@@ -584,6 +609,13 @@ func (t *Tug) ProcessEvent(e Event) {
 			TargetID:   1,
 			Payload:    t.ID,
 		})
+		t.Dispatcher.AddEvent(Event{
+			Time:       e.Time,
+			Type:       S_DETACH,
+			TargetID:   t.Ship,
+			TargetType: TGT_SHIP,
+			Payload:    0,
+		})
 	default:
 		log.Println("not implemented yet")
 	}
@@ -600,10 +632,11 @@ type Berth struct {
 
 func NewBerth(id, distance, cpu int, dispatcher *Dispatcher) Berth {
 	return Berth{
-		ID:         id,
-		Distance:   distance,
-		State:      BS_OPEN,
-		Dispatcher: dispatcher,
+		ID:                id,
+		Distance:          distance,
+		State:             BS_OPEN,
+		Dispatcher:        dispatcher,
+		ContainersPerUnit: cpu,
 	}
 }
 
@@ -623,14 +656,15 @@ func (b *Berth) ProcessEvent(e Event) error {
 		}
 
 		b.State = BS_OCCUPIED
+
+		log.Println("about to add unloading done event")
 		b.Dispatcher.AddEvent(Event{
 			TargetType: TGT_DISPATCHER,
 			TargetID:   1,
-			Type:       D_BERTH_OCCUPIED,
-			Payload:    b.ID,
-			Time:       e.Time + (e.Payload / b.ContainersPerUnit), // TODO: think through more complex interaction
+			Type:       D_UNLOADING_DONE,
+			Payload:    e.Payload,
+			Time:       e.Time + (b.Dispatcher.Ships[e.Payload].ContainerCount / b.ContainersPerUnit),
 		})
-		return nil
 	case B_UNDOCK:
 		if b.State != BS_OCCUPIED {
 			return fmt.Errorf("undock message received by unoccupied dock ID %d", b.ID)
