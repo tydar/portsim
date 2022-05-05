@@ -13,8 +13,8 @@ import (
 
 func main() {
 	dispatch := NewDispatcher()
-	b1 := NewBerth(1, 5000, 100, &dispatch)
-	b2 := NewBerth(2, 5000, 1000, &dispatch)
+	b1 := NewBerth(1, 2500, 100, &dispatch)
+	b2 := NewBerth(2, 2500, 1000, &dispatch)
 	s1 := NewShip(1, 1, 100, &dispatch)
 	s2 := NewShip(2, 1, 100, &dispatch)
 
@@ -23,7 +23,7 @@ func main() {
 	dispatch.AddShip(s1, 10)
 
 	t1 := NewTug(1, 5, &dispatch)
-	dispatch.AddTug(t1, 15)
+	dispatch.AddTug(t1, 100)
 
 	dispatch.AddShip(s2, 200)
 
@@ -35,6 +35,8 @@ func main() {
 	fmt.Printf("Tug moving? %t \n", dispatch.Tugs[1].State == TS_MOVING)
 	fmt.Printf("arrival queue: %+v\n", dispatch.BerthQueue)
 }
+
+// TODO: implement simulation type and constructor
 
 // shared types
 
@@ -72,6 +74,7 @@ type Dispatcher struct {
 	AvailableTugs   []int
 	AvailableBerths []int
 	LastEventTime   int
+	EventCount      int
 }
 
 // dispatcher events
@@ -115,6 +118,7 @@ func NewDispatcher() Dispatcher {
 		BerthQueue:      make([]int, 0),
 		DeparturesQueue: make([]int, 0),
 		LastEventTime:   0,
+		EventCount:      0,
 	}
 }
 
@@ -199,6 +203,7 @@ func (d *Dispatcher) ProcessNextEvent() error {
 	e := d.Events[0]
 	d.Events = d.Events[1:]
 	d.LastEventTime = e.Time
+	d.EventCount++
 
 	log.Printf("State: %+v\n", d)
 	log.Printf("Event: %+v\n", e)
@@ -329,6 +334,14 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 			Time:       e.Time + timeUnderway,
 		})
 
+		d.AddEvent(Event{
+			Type:       B_UNDOCK,
+			TargetType: TGT_BERTH,
+			TargetID:   ship.Berth,
+			Payload:    0,
+			Time:       e.Time + timeUnderway, // this makes assumptiont that berth isn't available until ship fully gone
+		})
+
 		if index+1 < len(d.DeparturesQueue) {
 			d.DeparturesQueue = append(d.DeparturesQueue[:index], d.DeparturesQueue[index+1:]...)
 		} else {
@@ -350,8 +363,10 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 			speed += d.Tugs[tugs[i]].Speed
 		}
 
+		ship := d.Ships[e.Payload]
+		distance := d.Berths[ship.Berth].Distance
 		speed = speed / len(tugs)
-		timeUnderway := 1000 / speed // TODO: update to calculate based on distances btwn tugs & berths / ocean
+		timeUnderway := distance / speed // DONE: update to calculate based on distances btwn tugs & berths / ocean
 
 		for i := range tugs {
 			d.AddEvent(Event{
