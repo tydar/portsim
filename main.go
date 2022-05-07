@@ -10,30 +10,18 @@ import (
 // 	 and distance payload for tug detach commands
 
 // TODO: ensure all ProcessEvents functions bubble up errors due to bad state transitions
+// TODO: fix race condition: tugs can all be assigned without ships moving
 
 func main() {
 	dispatch := NewDispatcher()
-	b1 := NewBerth(1, 2500, 100, &dispatch)
-	b2 := NewBerth(2, 2500, 1000, &dispatch)
-	s1 := NewShip(1, 1, 100, &dispatch)
-	s2 := NewShip(2, 1, 100, &dispatch)
+	berthDistances := []int{1000, 5000, 2500}
+	berthCpus := []int{20, 20, 20}
+	sim := NewSimulation(15, 5, 10, 5000, 100, 500, 2, 1000, 3, 834758239475, berthDistances, berthCpus, &dispatch)
+	sim.ConcretizeAll()
 
-	dispatch.AddBerth(b1, 0)
-	dispatch.AddBerth(b2, 0)
-	dispatch.AddShip(s1, 10)
-
-	t1 := NewTug(1, 5, &dispatch)
-	dispatch.AddTug(t1, 100)
-
-	dispatch.AddShip(s2, 200)
-
-	for e := dispatch.Events; len(e) != 0; e = dispatch.Events {
-		dispatch.ProcessNextEvent()
+	for e := sim.EventCount(); e != 0; e = sim.EventCount() {
+		sim.ProcessNextEvent()
 	}
-
-	fmt.Printf("Ship berthed? %t \n", dispatch.Ships[1].State == SS_BERTHED)
-	fmt.Printf("Tug moving? %t \n", dispatch.Tugs[1].State == TS_MOVING)
-	fmt.Printf("arrival queue: %+v\n", dispatch.BerthQueue)
 }
 
 // TODO: implement simulation type and constructor
@@ -96,6 +84,7 @@ const (
 	S_BERTH
 	S_LAUNCH
 	S_ASSIGN
+	S_TUG_ASSIGN
 
 	//tug
 	T_SHIP
@@ -178,7 +167,7 @@ func (d *Dispatcher) AddBerth(b Berth, openTime int) error {
 }
 
 func (d *Dispatcher) AddEvent(e Event) {
-	log.Printf("adding event: %+v", e)
+	//log.Printf("adding event: %+v", e)
 	for i := range d.Events {
 		// if the event's time is prior to the event at the current index
 		// we place this event in that index
@@ -205,7 +194,7 @@ func (d *Dispatcher) ProcessNextEvent() error {
 	d.LastEventTime = e.Time
 	d.EventCount++
 
-	log.Printf("State: %+v\n", d)
+	//log.Printf("State: %+v\n", d)
 	log.Printf("Event: %+v\n", e)
 
 	switch e.TargetType {
@@ -268,7 +257,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 				Type:       S_ASSIGN,
 				TargetType: TGT_SHIP,
 				TargetID:   e.Payload,
-				Time:       e.Time,
+				Time:       e.Time - 1,
 				Payload:    d.AvailableBerths[0],
 			})
 
@@ -281,7 +270,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 		d.BerthQueue = append(d.BerthQueue, e.Payload)
 		tugsCount := len(d.AvailableTugs)
 		index := 0
-		if tugsCount > 0 {
+		if tugsCount >= d.Ships[e.Payload].TugSize {
 			// dispatch appropriate number of tugs based on the ship's needs & capacity
 			for i := 0; i < tugsCount && i < d.Ships[e.Payload].TugSize; i++ {
 				d.AddEvent(Event{
@@ -293,8 +282,8 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 				})
 				index = i
 			}
+			d.AvailableTugs = d.AvailableTugs[index+1:]
 		}
-		d.AvailableTugs = d.AvailableTugs[index:]
 
 	case D_SHIP_LAUNCHING:
 		index := -1
@@ -331,7 +320,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 			TargetType: TGT_SHIP,
 			TargetID:   e.Payload,
 			Payload:    ship.Berth,
-			Time:       e.Time + timeUnderway,
+			Time:       e.Time + timeUnderway + 1,
 		})
 
 		d.AddEvent(Event{
@@ -339,7 +328,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 			TargetType: TGT_BERTH,
 			TargetID:   ship.Berth,
 			Payload:    0,
-			Time:       e.Time + timeUnderway, // this makes assumptiont that berth isn't available until ship fully gone
+			Time:       e.Time + timeUnderway + 1, // this makes assumptiont that berth isn't available until ship fully gone
 		})
 
 		if index+1 < len(d.DeparturesQueue) {
@@ -364,6 +353,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 		}
 
 		ship := d.Ships[e.Payload]
+		log.Printf("ship.Berth %d\n", ship.Berth)
 		distance := d.Berths[ship.Berth].Distance
 		speed = speed / len(tugs)
 		timeUnderway := distance / speed // DONE: update to calculate based on distances btwn tugs & berths / ocean
@@ -383,7 +373,7 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 			TargetType: TGT_SHIP,
 			TargetID:   e.Payload,
 			Payload:    0,
-			Time:       e.Time + timeUnderway,
+			Time:       e.Time + timeUnderway + 1,
 		})
 
 		if index+1 < len(d.BerthQueue) {
@@ -395,29 +385,64 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 	case D_TUG_AVAILABLE:
 		// check departure queue to free a berth first
 		depCount, arrCount := len(d.DeparturesQueue), len(d.BerthQueue)
+		d.AvailableTugs = append(d.AvailableTugs, e.Payload)
+		tugsCount := len(d.AvailableTugs)
+
+		//rework this logic to allow tugs to help arrivals if no appropriate departures
 
 		if depCount > 0 {
-			s := d.Ships[d.DeparturesQueue[0]]
-			d.AddEvent(Event{
-				Type:       T_SHIP,
-				TargetType: TGT_TUG,
-				TargetID:   e.Payload,
-				Payload:    s.ID,
-				Time:       e.Time,
-			})
-		} else if arrCount > 0 {
-			// verify there's a berth
-			s := d.Ships[d.BerthQueue[0]]
-			d.AddEvent(Event{
-				Type:       T_SHIP,
-				TargetType: TGT_TUG,
-				TargetID:   e.Payload,
-				Payload:    s.ID,
-				Time:       e.Time,
-			})
+			shipId := -1
+			index := 0
+			for i := range d.DeparturesQueue {
+				s := d.Ships[d.DeparturesQueue[i]]
+				if s.TugSize <= tugsCount && s.TugCount == 0 {
+					shipId = s.ID
+					break
+				}
+			}
 
-		} else {
-			d.AvailableTugs = append(d.AvailableTugs, e.Payload)
+			if shipId != -1 {
+				// dispatch appropriate number of tugs based on the ship's needs & capacity
+				for i := 0; i < d.Ships[shipId].TugSize; i++ {
+					d.AddEvent(Event{
+						Type:       T_SHIP,
+						TargetType: TGT_TUG,
+						TargetID:   d.AvailableTugs[i],
+						Payload:    shipId,
+						Time:       e.Time,
+					})
+					index = i
+				}
+				d.AvailableTugs = d.AvailableTugs[index+1:]
+
+			}
+
+		} else if arrCount > 0 {
+			shipId := -1
+			index := 0
+			for i := range d.BerthQueue {
+				s := d.Ships[d.BerthQueue[i]]
+				if s.TugSize <= tugsCount && s.TugCount == 0 {
+					shipId = s.ID
+					break
+				}
+			}
+
+			if shipId != -1 {
+				// dispatch appropriate number of tugs based on the ship's needs & capacity
+				for i := 0; i < d.Ships[shipId].TugSize; i++ {
+					d.AddEvent(Event{
+						Type:       T_SHIP,
+						TargetType: TGT_TUG,
+						TargetID:   d.AvailableTugs[i],
+						Payload:    shipId,
+						Time:       e.Time,
+					})
+					index = i
+				}
+				d.AvailableTugs = d.AvailableTugs[index+1:]
+
+			}
 		}
 
 	case D_BERTH_EMPTY:
@@ -457,20 +482,20 @@ func (d *Dispatcher) ProcessEvent(e Event) {
 		d.DeparturesQueue = append(d.DeparturesQueue, e.Payload)
 		tugsCount := len(d.AvailableTugs)
 		index := 0
-		if tugsCount > 0 {
+		if tugsCount >= d.Ships[e.Payload].TugSize && d.Ships[e.Payload].TugCount == 0 {
 			// dispatch appropriate number of tugs based on the ship's needs & capacity
-			for i := 0; i < tugsCount && i < d.Ships[e.Payload].TugSize; i++ {
+			for i := 0; i < d.Ships[e.Payload].TugSize; i++ {
 				d.AddEvent(Event{
 					Type:       T_SHIP,
 					TargetType: TGT_TUG,
 					TargetID:   d.AvailableTugs[i],
 					Payload:    e.Payload,
-					Time:       e.Time,
+					Time:       e.Time - 1,
 				})
 				index = i
 			}
+			d.AvailableTugs = d.AvailableTugs[index+1:]
 		}
-		d.AvailableTugs = d.AvailableTugs[index:]
 	}
 }
 
@@ -480,10 +505,11 @@ type Ship struct {
 	TugSize        int // number of tugs needed
 	TugCount       int // number of tugs attached
 	ContainerCount int // number of containers
-	State          int
+	State          ShipState
 	AttachedTugs   []int
 	Dispatcher     *Dispatcher
 	Berth          int
+	TugsAttached   int
 }
 
 // default NewShip function
@@ -498,26 +524,37 @@ func NewShip(id, tugSize, containerCount int, dispatcher *Dispatcher) Ship {
 		Dispatcher:     dispatcher,
 		AttachedTugs:   make([]int, tugSize),
 		Berth:          -1,
+		TugsAttached:   0,
 	}
 }
 
-// ship events
-const ()
-
 // ship states
+type ShipState int
+
+//go:generate stringer -type=ShipState
 const (
-	SS_BERTHING = iota
+	SS_BERTHING ShipState = iota
 	SS_BERTHED
 	SS_WAITING
+	SS_LAUNCHING
 	SS_GONE
 )
 
 func (s *Ship) ProcessEvent(e Event) {
 	switch e.Type {
-	case S_ATTACH:
+	case S_TUG_ASSIGN:
+		if s.State != SS_BERTHED && s.State != SS_WAITING {
+			log.Fatalf("ship ordered to tug assign when not waiting or berthed %+v status: %d\n", e, s.State)
+		}
 		s.AttachedTugs[s.TugCount] = e.Payload
 		s.TugCount++
-		if s.TugCount == s.TugSize {
+
+	case S_ATTACH:
+		if s.State != SS_BERTHED && s.State != SS_WAITING {
+			log.Fatalf("ship ordered to attach when not waiting or berthed %+v status: %d\n", e, s.State)
+		}
+		s.TugsAttached++
+		if s.TugsAttached == s.TugSize {
 			if s.State == SS_WAITING {
 				s.Dispatcher.AddEvent(Event{
 					TargetType: TGT_DISPATCHER,
@@ -526,6 +563,7 @@ func (s *Ship) ProcessEvent(e Event) {
 					Payload:    s.ID,
 					Time:       e.Time,
 				})
+				s.State = SS_BERTHING
 			} else if s.State == SS_BERTHED {
 				s.Dispatcher.AddEvent(Event{
 					TargetType: TGT_DISPATCHER,
@@ -534,13 +572,24 @@ func (s *Ship) ProcessEvent(e Event) {
 					Payload:    s.ID,
 					Time:       e.Time,
 				})
+				s.State = SS_LAUNCHING
 			}
-			s.State = SS_BERTHING
 		}
 
 	case S_DETACH:
+		if s.State != SS_BERTHING && s.State != SS_LAUNCHING {
+			log.Fatalf("ship ordered to detach when not berthing or launching %+v", e)
+		}
 		s.TugCount--
+		s.TugsAttached--
 	case S_BERTH:
+		if s.TugCount > 0 {
+			log.Fatalf("haven't discharged tugs yet: %+v", s)
+		}
+
+		if s.State != SS_BERTHING {
+			log.Fatalf("ship ordered to berth without berthing %+v", s)
+		}
 		s.State = SS_BERTHED
 		s.Dispatcher.AddEvent(Event{
 			Type:       B_DOCK,
@@ -550,8 +599,14 @@ func (s *Ship) ProcessEvent(e Event) {
 			Time:       e.Time,
 		})
 	case S_ASSIGN:
+		if s.State != SS_WAITING {
+			log.Fatalf("ship assigned when not waiting: %+v", s)
+		}
 		s.Berth = e.Payload
 	case S_LAUNCH:
+		if s.State != SS_LAUNCHING {
+			log.Fatalf("ship ordered gone when not launching: %+v", s)
+		}
 		s.State = SS_GONE
 	}
 }
@@ -560,7 +615,7 @@ func (s *Ship) ProcessEvent(e Event) {
 type Tug struct {
 	ID         int
 	Speed      int
-	State      int
+	State      TugState
 	Ship       int
 	Dispatcher *Dispatcher
 }
@@ -575,12 +630,13 @@ func NewTug(id, speed int, dispatcher *Dispatcher) Tug {
 	}
 }
 
-// tug events
-const ()
-
 // tug states
+//go:generate stringer -type=TugState
+
+type TugState int
+
 const (
-	TS_WAITING = iota
+	TS_WAITING TugState = iota
 	TS_TUGGING
 	TS_MOVING
 	TS_ATTACHING
@@ -589,8 +645,19 @@ const (
 func (t *Tug) ProcessEvent(e Event) {
 	switch e.Type {
 	case T_SHIP:
+		if t.State != TS_WAITING {
+			log.Fatalf("Tug ordered to attach when not waiting: %+v\n", e)
+		}
 		t.State = TS_ATTACHING
 		t.Ship = e.Payload
+
+		t.Dispatcher.AddEvent(Event{
+			Type:       S_TUG_ASSIGN,
+			TargetType: TGT_SHIP,
+			TargetID:   e.Payload,
+			Payload:    t.ID,
+			Time:       e.Time - 1, // to beat any pending D_TUG_AVAILABLE
+		})
 
 		t.Dispatcher.AddEvent(Event{
 			Time:       e.Time + (100 / t.Speed), // TODO: update this with duration calc based on distance
@@ -603,7 +670,7 @@ func (t *Tug) ProcessEvent(e Event) {
 	case T_GO:
 		if t.State != TS_ATTACHING {
 			// should never happen
-			log.Printf("tug ordered to go when not attached: %+v", e)
+			log.Fatalf("tug ordered to go when not attached: %+v tug: %+v\n", e, t)
 			return
 		}
 
@@ -613,10 +680,11 @@ func (t *Tug) ProcessEvent(e Event) {
 			Type:       T_DETACH,
 			TargetID:   t.ID,
 			TargetType: TGT_TUG,
+			Payload:    t.Ship,
 		})
 	case T_DETACH:
 		if t.State != TS_MOVING {
-			log.Println("tug ordered to detach when not attached")
+			log.Fatalf("tug ordered to detach when not attached %+v tug: %+v\n", e, t)
 			return
 		}
 		t.State = TS_WAITING
@@ -628,7 +696,7 @@ func (t *Tug) ProcessEvent(e Event) {
 			Payload:    t.ID,
 		})
 		t.Dispatcher.AddEvent(Event{
-			Time:       e.Time,
+			Time:       e.Time - 1,
 			Type:       S_DETACH,
 			TargetID:   t.Ship,
 			TargetType: TGT_SHIP,
@@ -643,7 +711,7 @@ func (t *Tug) ProcessEvent(e Event) {
 type Berth struct {
 	ID                int
 	Distance          int // abstracted linear distance from entrance to port
-	State             int
+	State             BerthState
 	ContainersPerUnit int // unloading / loading speed abstraction
 	Dispatcher        *Dispatcher
 }
@@ -659,8 +727,11 @@ func NewBerth(id, distance, cpu int, dispatcher *Dispatcher) Berth {
 }
 
 // berth states
+type BerthState int
+
+//go:generate stringer -type=BerthState
 const (
-	BS_OPEN = iota
+	BS_OPEN BerthState = iota
 	BS_CLOSED
 	BS_OCCUPIED
 	BS_RESERVED

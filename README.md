@@ -11,4 +11,4 @@ TODO:
 3) Add logic for loading/unloading. [NEXT]
 4) Implement logic for individual container tracking.
 5) Provide a terminal UI for monitoring and interacting with the simulation.
-6) Implement Stringer interface generation for enums; factor states and message type codes into their own types to facilitate pretty printing. DONE
+6) Implement Stringer interface generation for enums; factor states and message type codes into their own types to facilitate pretty printing. [DONE]
