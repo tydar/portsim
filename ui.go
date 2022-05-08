@@ -154,6 +154,18 @@ func viewMain(m model) string {
 
 	s += listItemStyle.Render(fmt.Sprintf("Enqueued Events: %d\n", m.Sim.EventCount()))
 
+	shipsBlock := listItemStyle.Render(fmt.Sprintf("Active Ships: %d", m.Sim.ActiveShipCount()))
+
+	shipsBlock += listItemStyle.Render(
+		fmt.Sprintf("WAITING: %d BERTHING: %d BERTHED: %d LAUNCHING: %d GONE: %d",
+			m.Sim.ShipsByState(SS_WAITING),
+			m.Sim.ShipsByState(SS_BERTHING),
+			m.Sim.ShipsByState(SS_BERTHED),
+			m.Sim.ShipsByState(SS_LAUNCHING),
+			m.Sim.ShipsByState(SS_GONE),
+		))
+
+	s += shipsBlock
 	s += listItemStyle.Render(fmt.Sprintf("Step Count: %d", m.SteppedCount))
 	return s
 }

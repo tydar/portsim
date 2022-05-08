@@ -106,3 +106,21 @@ func (s *Simulation) ProcessNextEvent() error {
 func (s *Simulation) EventCount() int {
 	return len(s.dispatcher.Events)
 }
+
+// queries for UI
+// TODO: for queries that may be against a very large list (i.e. ships)
+//       calc and cache once per event in ProcessNextEvent
+
+func (s Simulation) ShipsByState(state ShipState) int {
+	count := 0
+	for i := range s.dispatcher.Ships {
+		if s.dispatcher.Ships[i].State == state {
+			count++
+		}
+	}
+	return count
+}
+
+func (s Simulation) ActiveShipCount() int {
+	return s.ShipCount - s.ShipsByState(SS_GONE)
+}
