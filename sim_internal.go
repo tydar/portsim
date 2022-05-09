@@ -617,7 +617,7 @@ type TugState int
 
 const (
 	TS_WAITING TugState = iota
-	TS_TUGGING
+	//TS_TUGGING
 	TS_MOVING
 	TS_ATTACHING
 )

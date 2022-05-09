@@ -166,6 +166,26 @@ func viewMain(m model) string {
 		))
 
 	s += shipsBlock
+
+	tugsBlock := listItemStyle.Render(fmt.Sprintf("Available Tugs: %d", len(m.Sim.dispatcher.AvailableTugs)))
+	tugsBlock += listItemStyle.Render(
+		fmt.Sprintf("WAITING: %d ATTACHING: %d MOVING %d",
+			m.Sim.TugsByState(TS_WAITING),
+			m.Sim.TugsByState(TS_ATTACHING),
+			m.Sim.TugsByState(TS_MOVING),
+		))
+
+	s += tugsBlock
+
+	berthsBlock := listItemStyle.Render(fmt.Sprintf("Available Berths: %d", len(m.Sim.dispatcher.AvailableBerths)))
+	berthsBlock += listItemStyle.Render(
+		fmt.Sprintf("OPEN: %d RESERVED: %d OCCUPIED: %d",
+			m.Sim.BerthsByState(BS_OPEN),
+			m.Sim.BerthsByState(BS_RESERVED),
+			m.Sim.BerthsByState(BS_OCCUPIED),
+		))
+
+	s += berthsBlock
 	s += listItemStyle.Render(fmt.Sprintf("Step Count: %d", m.SteppedCount))
 	return s
 }

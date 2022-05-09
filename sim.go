@@ -124,3 +124,23 @@ func (s Simulation) ShipsByState(state ShipState) int {
 func (s Simulation) ActiveShipCount() int {
 	return s.ShipCount - s.ShipsByState(SS_GONE)
 }
+
+func (s Simulation) TugsByState(state TugState) int {
+	count := 0
+	for i := range s.dispatcher.Tugs {
+		if s.dispatcher.Tugs[i].State == state {
+			count++
+		}
+	}
+	return count
+}
+
+func (s Simulation) BerthsByState(state BerthState) int {
+	count := 0
+	for i := range s.dispatcher.Berths {
+		if s.dispatcher.Berths[i].State == state {
+			count++
+		}
+	}
+	return count
+}
