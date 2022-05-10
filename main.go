@@ -23,7 +23,7 @@ func main() {
 	log.SetOutput(f)
 
 	m := initModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	if err := p.Start(); err != nil {
 		log.Fatal("could not start program:", err)

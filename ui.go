@@ -14,11 +14,17 @@ var (
 			Bold(true).
 			Padding(5, 8)
 
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Padding(2, 8)
+
 	buttonStyle = lipgloss.NewStyle().Padding(0, 5)
 	// less padding on focused style to avoid jumping when changing selection
 	focusedStyle = lipgloss.NewStyle().Padding(0, 3).Bold(true)
 
-	listItemStyle = lipgloss.NewStyle().Padding(1, 5)
+	listTitleStyle = lipgloss.NewStyle().Padding(1, 5).Bold(true)
+	listItemStyle  = lipgloss.NewStyle().Padding(1, 3)
+	listStyle      = lipgloss.NewStyle().Margin(1).BorderStyle(lipgloss.NormalBorder())
 )
 
 type ModelState int
@@ -150,12 +156,11 @@ func updateMain(m model, message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func viewMain(m model) string {
-	s := titleStyle.Render("Port Simulator") + "\n\n"
+	s := headerStyle.Render("Port Simulator") + "\n\n"
 
-	s += listItemStyle.Render(fmt.Sprintf("Enqueued Events: %d\n", m.Sim.EventCount()))
+	s += listItemStyle.Render(fmt.Sprintf("Enqueued Events: %d Step Count: %d", m.Sim.EventCount(), m.SteppedCount))
 
-	shipsBlock := listItemStyle.Render(fmt.Sprintf("Active Ships: %d", m.Sim.ActiveShipCount()))
-
+	shipsBlock := listTitleStyle.Render(fmt.Sprintf("Active Ships: %d", m.Sim.ActiveShipCount()))
 	shipsBlock += listItemStyle.Render(
 		fmt.Sprintf("WAITING: %d BERTHING: %d BERTHED: %d LAUNCHING: %d GONE: %d",
 			m.Sim.ShipsByState(SS_WAITING),
@@ -165,9 +170,9 @@ func viewMain(m model) string {
 			m.Sim.ShipsByState(SS_GONE),
 		))
 
-	s += shipsBlock
+	s += listStyle.Render(shipsBlock)
 
-	tugsBlock := listItemStyle.Render(fmt.Sprintf("Available Tugs: %d", len(m.Sim.dispatcher.AvailableTugs)))
+	tugsBlock := listTitleStyle.Render(fmt.Sprintf("Available Tugs: %d", len(m.Sim.dispatcher.AvailableTugs)))
 	tugsBlock += listItemStyle.Render(
 		fmt.Sprintf("WAITING: %d ATTACHING: %d MOVING %d",
 			m.Sim.TugsByState(TS_WAITING),
@@ -175,9 +180,9 @@ func viewMain(m model) string {
 			m.Sim.TugsByState(TS_MOVING),
 		))
 
-	s += tugsBlock
+	s += listStyle.Render(tugsBlock)
 
-	berthsBlock := listItemStyle.Render(fmt.Sprintf("Available Berths: %d", len(m.Sim.dispatcher.AvailableBerths)))
+	berthsBlock := listTitleStyle.Render(fmt.Sprintf("Available Berths: %d", len(m.Sim.dispatcher.AvailableBerths)))
 	berthsBlock += listItemStyle.Render(
 		fmt.Sprintf("OPEN: %d RESERVED: %d OCCUPIED: %d",
 			m.Sim.BerthsByState(BS_OPEN),
@@ -185,8 +190,7 @@ func viewMain(m model) string {
 			m.Sim.BerthsByState(BS_OCCUPIED),
 		))
 
-	s += berthsBlock
-	s += listItemStyle.Render(fmt.Sprintf("Step Count: %d", m.SteppedCount))
+	s += listStyle.Render(berthsBlock)
 	return s
 }
 
